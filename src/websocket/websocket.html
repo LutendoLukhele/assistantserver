@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+    <style>
+        .log { font-family: monospace; margin: 5px; }
+        .error { color: red; }
+        .success { color: green; }
+        .info { color: blue; }
+    </style>
+</head>
+<body>
+    <button onclick="connect()">Connect</button>
+    <button onclick="sendPing()">Send Ping</button>
+    <button onclick="disconnect()">Disconnect</button>
+    <div id="log"></div>
+
+    <script>
+        let ws;
+        
+        function log(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.textContent = `${new Date().toISOString()} - ${msg}`;
+            document.getElementById('log').prepend(div);
+            console.log(msg);
+        }
+
+        function connect() {
+            try {
+                const sessionId = Date.now().toString();
+                const url = `wss://3000-idx-sg0808-1723099239615.cluster-p6qcyjpiljdwusmrjxdspyb5m2.cloudworkstations.dev/ws/${sessionId}`;
+                log(`Connecting to ${url}...`);
+                
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    log('Connected successfully!', 'success');
+                };
+
+                ws.onmessage = (event) => {
+                    log(`Received: ${event.data}`, 'info');
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket Error: ${JSON.stringify(error)}`, 'error');
+                };
+
+                ws.onclose = (event) => {
+                    log(`Connection closed. Code: ${event.code}, Reason: ${event.reason}`, 'error');
+                    if (event.code === 1006) {
+                        log('Abnormal closure - possible proxy/firewall issue', 'error');
+                    }
+                };
+            } catch (error) {
+                log(`Error creating WebSocket: ${error.message}`, 'error');
+            }
+        }
+
+        function sendPing() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const pingMessage = {
+                    type: 'ping',
+                    timestamp: new Date().toISOString()
+                };
+                ws.send(JSON.stringify(pingMessage));
+                log('Ping sent');
+            } else {
+                log('WebSocket not connected!', 'error');
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                log('Disconnected by user');
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+{
+  "tools": [
+    {
+      "name": "fetch_emails",
+      "description": "Fetch most recent emails from Gmail. If no arguments are provided, returns the most recent emails.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "maxResults": {
+            "type": "integer",
+            "description": "Optional: Maximum number of emails to fetch",
+            "optional": true
+          },
+          "query": {
+            "type": "string",
+            "description": "Optional: Search query to filter emails",
+            "optional": true
+          }
+        },
+        "required": []
+      },
+      "default_params": {}
+    },
+    {
+      "name": "send_email",
+      "description": "Send an email using Google Mail",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "description": "Recipient email address"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Email subject"
+          },
+          "body": {
+            "type": "string",
+            "description": "Email body content"
+          }
+        },
+        "required": ["to", "subject", "body"]
+      },
+      "default_params": {}
+    },
+    {
+      "name": "fetch_entity",
+      "description": "Fetch records from Salesforce",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "description": "Type of entity to fetch (Account, Contact, Lead, etc.)"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Identifier to fetch specific record",
+            "optional": true
+          }
+        },
+        "required": ["entityType"]
+      },
+      "default_params": {}
+    }
+  ],
+  "providers": {
+    "google-mail": {
+      "endpoint": "fetch-emails",
+      "provider_config_key": "google-mail",
+      "connection_id": "test-connection-id",
+      "objects": []
+    },
+    "salesforce": {
+      "endpoint": "salesforce",
+      "provider_config_key": "salesforce",
+      "connection_id": "test-connection-id",
+      "objects": ["Account", "Contact", "Lead", "Deal", "Article", "Case"]
+    }
+  }
+}

@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package assistant;
+
+// Main Assistant Service definition
+service AssistantService {
+  // Stream for real-time message exchange
+  rpc StreamConversation (stream ClientMessage) returns (stream ServerMessage) {}
+  
+  // Single message exchange
+  rpc SendMessage (MessageRequest) returns (MessageResponse) {}
+  
+  // Get conversation history
+  rpc GetConversationHistory (HistoryRequest) returns (HistoryResponse) {}
+}
+
+// Message sent from client to server
+message ClientMessage {
+  string session_id = 1;
+  string connection_id = 2;
+  string provider = 3;
+  string content = 4;
+  string message_id = 5;
+  uint64 timestamp = 6;
+}
+
+// Message sent from server to client
+message ServerMessage {
+  string message_id = 1;
+  string content = 2;
+  MessageType type = 3;
+  repeated ToolCall tool_calls = 4;
+  string session_id = 5;
+  uint64 timestamp = 6;
+  MessageStatus status = 7;
+}
+
+// Tool call representation
+message ToolCall {
+  string tool_call_id = 1;
+  string function_name = 2;
+  string arguments = 3;
+  ToolCallStatus status = 4;
+  string result = 5;
+  uint64 timestamp = 6;
+}
+
+// Request for sending a message
+message MessageRequest {
+  string session_id = 1;
+  string connection_id = 2;
+  string provider = 3;
+  string content = 4;
+}
+
+// Response for message requests
+message MessageResponse {
+  string message_id = 1;
+  string content = 2;
+  repeated ToolCall tool_calls = 3;
+  MessageStatus status = 4;
+}
+
+// Request for conversation history
+message HistoryRequest {
+  string session_id = 1;
+  uint32 limit = 2;
+  uint64 before_timestamp = 3;
+}
+
+// Response containing conversation history
+message HistoryResponse {
+  repeated ServerMessage messages = 1;
+  bool has_more = 2;
+}
+
+// Enum for message types
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_USER = 1;
+  MESSAGE_TYPE_ASSISTANT = 2;
+  MESSAGE_TYPE_SYSTEM = 3;
+  MESSAGE_TYPE_TOOL = 4;
+}
+
+// Enum for message status
+enum MessageStatus {
+  MESSAGE_STATUS_UNSPECIFIED = 0;
+  MESSAGE_STATUS_PENDING = 1;
+  MESSAGE_STATUS_PROCESSING = 2;
+  MESSAGE_STATUS_COMPLETE = 3;
+  MESSAGE_STATUS_ERROR = 4;
+}
+
+// Enum for tool call status
+enum ToolCallStatus {
+  TOOL_CALL_STATUS_UNSPECIFIED = 0;
+  TOOL_CALL_STATUS_PENDING = 1;
+  TOOL_CALL_STATUS_EXECUTING = 2;
+  TOOL_CALL_STATUS_COMPLETE = 3;
+  TOOL_CALL_STATUS_ERROR = 4;
+}
