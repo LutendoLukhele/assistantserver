@@ -214,7 +214,8 @@ export enum MessageType {
      * @generated from protobuf enum value: MESSAGE_TYPE_TOOL = 4;
      */
     TOOL = 4,
-    MESSAGE_TYPE_ASSISTANT
+    MESSAGE_TYPE_ASSISTANT,
+    MESSAGE_TYPE_SYSTEM
 }
 /**
  * Enum for message status
@@ -242,7 +243,10 @@ export enum MessageStatus {
      * @generated from protobuf enum value: MESSAGE_STATUS_ERROR = 4;
      */
     ERROR = 4,
-    MESSAGE_STATUS_COMPLETE
+    MESSAGE_STATUS_COMPLETE,
+    MESSAGE_STATUS_ERROR /**
+ * @generated from protobuf field: string function_name = 2;
+ */
 }
 /**
  * Enum for tool call status
