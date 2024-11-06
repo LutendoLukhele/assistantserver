@@ -69,7 +69,7 @@
     "google-mail": {
       "endpoint": "fetch-emails",
       "provider_config_key": "google-mail",
-      "connection_id": "7fd35c0c-341c-46e0-bd91-f2b45b8db9b6",
+      "connection_id": "cd7f9f71-1dee-4796-be35-accb0951c641",
       "objects": []
     },
     "salesforce": {

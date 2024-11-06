@@ -134,22 +134,22 @@ export class GroqService {
     }> {
         try {
             logger.info('Processing streaming message', { sessionId, connectionId, provider });
-
+    
             if (!this.messageHistory.has(sessionId)) {
                 const initialMessages = this.initializeMessageHistory();
                 this.messageHistory.set(sessionId, initialMessages);
                 logger.info('Initialized new message history', { sessionId });
             }
-
+    
             if (!this.toolServiceProvider) {
                 logger.error('ToolServiceProvider not set');
                 throw new Error('ToolServiceProvider not set');
             }
-
+    
             this.addUserMessage(sessionId, message);
             let accumulatedContent = '';
             let buffer = '';
-
+    
             const messages = (this.messageHistory.get(sessionId) || []).map(msg => ({
                 role: msg.role,
                 content: msg.content,
@@ -157,7 +157,7 @@ export class GroqService {
                 tool_calls: msg.tool_calls,
                 name: msg.name
             }));
-
+    
             const tools = this.configManager.getToolDescriptions();
             
             const stream = await this.client.chat.completions.create({
@@ -169,37 +169,27 @@ export class GroqService {
                 max_tokens: 1000,
                 stream: true
             });
-
-            const flushBuffer = () => {
-                if (buffer.length > 0) {
-                    const content = buffer;
-                    buffer = '';
-                    return content;
-                }
-                return null;
-            };
-
+    
             let currentToolCall: any = null;
-
+    
             for await (const chunk of stream) {
                 const content = chunk.choices[0]?.delta?.content || '';
                 const toolCalls = chunk.choices[0]?.delta?.tool_calls;
-
+    
                 if (content) {
                     buffer += content;
                     accumulatedContent += content;
-
+    
                     if (buffer.match(/[.!?]\s/) || buffer.length > 50) {
-                        const toSend = flushBuffer();
-                        if (toSend) {
-                            yield {
-                                type: 'content',
-                                content: toSend
-                            };
-                        }
+                        const toSend = buffer;
+                        buffer = '';
+                        yield {
+                            type: 'content',
+                            content: toSend
+                        };
                     }
                 }
-
+    
                 if (toolCalls?.length) {
                     const toolCall = toolCalls[0];
                     
@@ -219,120 +209,130 @@ export class GroqService {
                             currentToolCall.function.name = toolCall.function.name;
                         }
                     }
-
+    
+                    // When tool call is complete
                     if (currentToolCall.function.name && currentToolCall.function.arguments.endsWith('}')) {
                         logger.info('Complete tool call received', { 
                             toolName: currentToolCall.function.name,
                             toolCallId: currentToolCall.id
                         });
-
+    
+                        // Add the assistant's message that includes the tool call
+                        this.addAssistantMessage(sessionId, {
+                            content: accumulatedContent,
+                            tool_calls: [currentToolCall]
+                        });
+    
                         yield {
                             type: 'tool_call',
                             content: JSON.stringify(currentToolCall.function),
                             toolCallId: currentToolCall.id
                         };
-
+    
                         try {
                             const args = JSON.parse(currentToolCall.function.arguments);
-                            logger.info('Executing tool call via ToolServiceProvider', {
-                                toolName: currentToolCall.function.name,
-                                args,
-                                sessionId
-                            });
-
-                            const result = await this.toolServiceProvider.executeToolCall(
+                            const toolResult = await this.toolServiceProvider.executeToolCall(
                                 currentToolCall.function.name,
                                 args,
                                 sessionId,
                                 connectionId,
                                 provider
                             );
-
-                            logger.info('Tool call executed successfully', {
-                                toolName: currentToolCall.function.name,
-                                resultSize: JSON.stringify(result).length
-                            });
-
+    
+                            // Add tool result to history
                             this.addToolMessage(
                                 sessionId,
                                 currentToolCall.id,
                                 currentToolCall.function.name,
-                                result
+                                toolResult
                             );
-
+    
                             yield {
                                 type: 'tool_result',
-                                content: JSON.stringify(result),
+                                content: JSON.stringify(toolResult),
                                 toolCallId: currentToolCall.id
                             };
-
-                            const followUpMessages = [...messages, {
+    
+                            // Get follow-up stream with updated conversation history
+                            const updatedMessages = [...messages, {
                                 role: 'assistant',
-                                content: accumulatedContent
+                                content: accumulatedContent,
+                                tool_calls: [currentToolCall]
                             }, {
                                 role: 'tool',
-                                content: JSON.stringify(result),
+                                content: JSON.stringify(toolResult),
                                 tool_call_id: currentToolCall.id,
                                 name: currentToolCall.function.name
                             }];
-
+    
+                            // Start new completion stream with tool results
                             const followUpStream = await this.client.chat.completions.create({
                                 model: 'llama-3.1-70b-versatile',
-                                messages: followUpMessages as any[],
+                                messages: updatedMessages as any[],
                                 tools,
                                 tool_choice: 'auto',
                                 temperature: 0.7,
                                 max_tokens: 1000,
                                 stream: true
                             });
-
-                            for await (const chunk of followUpStream) {
-                                const content = chunk.choices[0]?.delta?.content || '';
-                                if (content) {
-                                    accumulatedContent += content;
-                                    yield {
-                                        type: 'content',
-                                        content
-                                    };
+    
+                            // Reset accumulated content for follow-up response
+                            accumulatedContent = '';
+                            buffer = '';
+    
+                            // Stream the follow-up response
+                            for await (const followUpChunk of followUpStream) {
+                                const followUpContent = followUpChunk.choices[0]?.delta?.content || '';
+                                if (followUpContent) {
+                                    buffer += followUpContent;
+                                    accumulatedContent += followUpContent;
+    
+                                    if (buffer.match(/[.!?]\s/) || buffer.length > 50) {
+                                        const toSend = buffer;
+                                        buffer = '';
+                                        yield {
+                                            type: 'content',
+                                            content: toSend
+                                        };
+                                    }
                                 }
                             }
-
+    
                         } catch (error) {
-                            logger.error('Error executing tool call', {
-                                error: error instanceof Error ? error.message : 'Unknown error',
-                                toolCall: currentToolCall
-                            });
-
+                            logger.error('Error executing tool call', { error, toolCall: currentToolCall });
                             yield {
                                 type: 'tool_result',
                                 content: JSON.stringify({ error: 'Tool execution failed' }),
                                 toolCallId: currentToolCall.id
                             };
                         }
-
+    
                         currentToolCall = null;
                     }
                 }
             }
-
-            const remaining = flushBuffer();
-            if (remaining) {
+    
+            // Send any remaining content
+            if (buffer) {
                 yield {
                     type: 'content',
-                    content: remaining
+                    content: buffer
                 };
             }
-
-            this.addAssistantMessage(sessionId, { 
-                content: accumulatedContent,
-                timestamp: new Date().toISOString()
-            });
-
+    
+            // Add final assistant message
+            if (accumulatedContent) {
+                this.addAssistantMessage(sessionId, { 
+                    content: accumulatedContent,
+                    timestamp: new Date().toISOString()
+                });
+            }
+    
             logger.info('Stream completed', { 
                 sessionId,
                 contentLength: accumulatedContent.length
             });
-
+    
         } catch (error) {
             logger.error('Error in streamMessage', {
                 error: error instanceof Error ? error.message : 'Unknown error',

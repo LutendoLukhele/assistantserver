@@ -2,151 +2,206 @@ import { Nango } from '@nangohq/node';
 import winston from 'winston';
 
 const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.json(),
+    level: 'debug',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+    ),
     defaultMeta: { service: 'NangoService' },
     transports: [
-        new winston.transports.Console(),
+        new winston.transports.Console({
+            format: winston.format.combine(
+                winston.format.colorize(),
+                winston.format.simple()
+            )
+        }),
+        new winston.transports.File({ 
+            filename: 'nango-debug.log',
+            level: 'debug'
+        })
     ],
 });
 
 export class NangoService {
     private nango: Nango;
-    private connectionId: string = 'test-connection-id';
+    private connectionId?: string;
 
     constructor(secretKey: string) {
         if (!secretKey) {
-            throw new Error('Nango secret key is required');
+            throw new Error('NANGO_SECRET_KEY is required');
         }
-        
         this.nango = new Nango({ secretKey });
-        logger.info('Nango SDK initialized');
+        logger.info('Nango SDK initialized', {
+            secretKeyLength: secretKey.length,
+            timestamp: new Date().toISOString()
+        });
     }
 
-    public setConnectionId(connectionId: string) {
+    setConnectionId(connectionId: string) {
         this.connectionId = connectionId;
-        logger.info('Connection ID set', { connectionId });
+        logger.info('Connection ID set', { 
+            connectionId,
+            timestamp: new Date().toISOString()
+        });
     }
 
-    public async fetchEmails(providerConfigKey: string): Promise<any> {
+    private validateConnection() {
+        if (!this.connectionId) {
+            throw new Error('Connection ID not set');
+        }
+    }
+
+    private logActionAttempt(actionName: string, providerConfigKey: string, args: any = {}) {
+        logger.debug('Attempting Nango action', {
+            action: actionName,
+            providerConfigKey,
+            connectionId: this.connectionId,
+            args: JSON.stringify(args),
+            timestamp: new Date().toISOString(),
+            environment: process.env.NODE_ENV || 'development'
+        });
+    }
+
+    async fetchEmails(providerConfigKey: string, args: Record<string, any> = {}): Promise<any> {
         try {
-            logger.info('Fetching emails', { 
-                connectionId: this.connectionId, 
-                providerConfigKey 
-            });
+            this.validateConnection();
+            this.logActionAttempt('fetch-emails', providerConfigKey, args);
 
             const response = await this.nango.triggerAction(
                 providerConfigKey,
-                this.connectionId,
-                'fetch-emails'
+                this.connectionId!,
+                'fetch-emails',
+                args
             );
 
-            logger.info('Emails fetched successfully');
+            logger.debug('Email fetch response received', {
+                action: 'fetch-emails',
+                success: true,
+                responseType: typeof response,
+                dataSnapshotLength: JSON.stringify(response).length,
+                timestamp: new Date().toISOString()
+            });
+
             return response;
+
         } catch (error: any) {
-            logger.error('Error fetching emails', { error });
-            throw new Error(`Error fetching emails: ${error.message}`);
+            logger.error('Error in fetchEmails', {
+                error: {
+                    message: error.message,
+                    name: error.name,
+                    code: error.code,
+                    response: error.response?.data
+                },
+                context: {
+                    providerConfigKey,
+                    connectionId: this.connectionId,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            throw error;
         }
     }
 
-    public async sendEmail(
-        providerConfigKey: string,
-        emailData: Record<string, any>
-    ): Promise<any> {
+    async sendEmail(providerConfigKey: string, emailData: any): Promise<any> {
         try {
-            logger.info('Sending email', { 
-                connectionId: this.connectionId, 
-                providerConfigKey 
+            this.validateConnection();
+            this.logActionAttempt('send-email', providerConfigKey, {
+                to: emailData.to,
+                subject: emailData.subject,
+                hasBody: !!emailData.body
             });
 
             const response = await this.nango.triggerAction(
                 providerConfigKey,
-                this.connectionId,
+                this.connectionId!,
                 'send-email',
                 emailData
             );
 
-            logger.info('Email sent successfully');
+            logger.info('Email sent successfully', {
+                to: emailData.to,
+                subject: emailData.subject,
+                timestamp: new Date().toISOString()
+            });
+
             return response;
+
         } catch (error: any) {
-            logger.error('Error sending email', { error });
-            throw new Error(`Error sending email: ${error.message}`);
+            logger.error('Error in sendEmail', {
+                error: {
+                    message: error.message,
+                    name: error.name,
+                    code: error.code,
+                    response: error.response?.data
+                },
+                context: {
+                    to: emailData.to,
+                    subject: emailData.subject,
+                    providerConfigKey,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            throw error;
         }
     }
 
-    public async fetchEntity(
-        providerConfigKey: string,
-        entityType: string
-    ): Promise<any> {
+    async fetchEntity(providerConfigKey: string, entityType: string): Promise<any> {
         try {
-            logger.info('Fetching entity', { 
-                connectionId: this.connectionId, 
-                providerConfigKey,
-                entityType 
-            });
+            this.validateConnection();
+            this.logActionAttempt('fetch-entity', providerConfigKey, { entityType });
 
             const response = await this.nango.triggerAction(
                 providerConfigKey,
-                this.connectionId,
+                this.connectionId!,
                 'fetch-entity',
                 { entityType }
             );
 
-            logger.info('Entity fetched successfully');
-            return response;
-        } catch (error: any) {
-            logger.error('Error fetching entity', { error });
-            throw new Error(`Error fetching entity: ${error.message}`);
-        }
-    }
-
-    public async createEntity(
-        providerConfigKey: string,
-        entityType: string,
-        fields: Record<string, any>
-    ): Promise<any> {
-        try {
-            logger.info('Creating entity', { 
-                connectionId: this.connectionId, 
-                providerConfigKey,
-                entityType 
-            });
-
-            const response = await this.nango.triggerAction(
-                providerConfigKey,
-                this.connectionId,
-                'create-entity',
-                {
-                    entityType,
-                    fields
-                }
-            );
-
-            logger.info('Entity created successfully');
-            return response;
-        } catch (error: any) {
-            logger.error('Error creating entity', { error });
-            throw new Error(`Error creating entity: ${error.message}`);
-        }
-    }
-
-    public async updateEntity(
-        providerConfigKey: string,
-        entityType: string,
-        identifier: string,
-        fields: Record<string, any>
-    ): Promise<any> {
-        try {
-            logger.info('Updating entity', { 
-                connectionId: this.connectionId, 
-                providerConfigKey,
+            logger.debug('Entity fetch response received', {
+                action: 'fetch-entity',
                 entityType,
-                identifier 
+                success: true,
+                responseType: typeof response,
+                timestamp: new Date().toISOString()
+            });
+
+            return response;
+
+        } catch (error: any) {
+            logger.error('Error in fetchEntity', {
+                error: {
+                    message: error.message,
+                    name: error.name,
+                    code: error.code,
+                    response: error.response?.data
+                },
+                context: {
+                    entityType,
+                    providerConfigKey,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            throw error;
+        }
+    }
+
+    async updateEntity(
+        providerConfigKey: string, 
+        entityType: string, 
+        identifier: string, 
+        fields: Record<string, any>
+    ): Promise<any> {
+        try {
+            this.validateConnection();
+            this.logActionAttempt('update-entity', providerConfigKey, {
+                entityType,
+                identifier,
+                fieldsKeys: Object.keys(fields)
             });
 
             const response = await this.nango.triggerAction(
                 providerConfigKey,
-                this.connectionId,
+                this.connectionId!,
                 'update-entity',
                 {
                     entityType,
@@ -155,30 +210,81 @@ export class NangoService {
                 }
             );
 
-            logger.info('Entity updated successfully');
+            logger.debug('Entity update response received', {
+                action: 'update-entity',
+                entityType,
+                identifier,
+                success: true,
+                timestamp: new Date().toISOString()
+            });
+
             return response;
+
         } catch (error: any) {
-            logger.error('Error updating entity', { error });
-            throw new Error(`Error updating entity: ${error.message}`);
+            logger.error('Error in updateEntity', {
+                error: {
+                    message: error.message,
+                    name: error.name,
+                    code: error.code,
+                    response: error.response?.data
+                },
+                context: {
+                    entityType,
+                    identifier,
+                    providerConfigKey,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            throw error;
         }
     }
 
-    public async getConnectionDetails(): Promise<any> {
+    async createEntity(
+        providerConfigKey: string, 
+        entityType: string, 
+        fields: Record<string, any>
+    ): Promise<any> {
         try {
-            logger.info('Fetching connection details', { 
-                connectionId: this.connectionId 
+            this.validateConnection();
+            this.logActionAttempt('create-entity', providerConfigKey, {
+                entityType,
+                fieldsKeys: Object.keys(fields)
             });
 
-            const response = await this.nango.getConnection(
-                'google-mail', // providerConfigKey
-                this.connectionId
+            const response = await this.nango.triggerAction(
+                providerConfigKey,
+                this.connectionId!,
+                'create-entity',
+                {
+                    entityType,
+                    fields
+                }
             );
 
-            logger.info('Connection details fetched successfully');
+            logger.debug('Entity creation response received', {
+                action: 'create-entity',
+                entityType,
+                success: true,
+                timestamp: new Date().toISOString()
+            });
+
             return response;
+
         } catch (error: any) {
-            logger.error('Error fetching connection details', { error });
-            throw new Error(`Error fetching connection details: ${error.message}`);
+            logger.error('Error in createEntity', {
+                error: {
+                    message: error.message,
+                    name: error.name,
+                    code: error.code,
+                    response: error.response?.data
+                },
+                context: {
+                    entityType,
+                    providerConfigKey,
+                    timestamp: new Date().toISOString()
+                }
+            });
+            throw error;
         }
     }
 }

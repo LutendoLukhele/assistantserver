@@ -15,7 +15,7 @@ config();
 
 // Setup logging
 const logger = winston.createLogger({
-    level: 'info',
+    level: 'debug',
     format: winston.format.combine(
         winston.format.timestamp(),
         winston.format.json()
@@ -27,6 +27,10 @@ const logger = winston.createLogger({
                 winston.format.colorize(),
                 winston.format.simple()
             )
+        }),
+        new winston.transports.File({ 
+            filename: 'websocket-server.log',
+            level: 'debug'
         })
     ],
 });
@@ -35,8 +39,6 @@ interface ClientMessage {
     messageId: string;
     content: string;
     sessionId: string;
-    connectionId: string;
-    provider: string;
     type: MessageType;
 }
 
@@ -48,6 +50,12 @@ interface ServerMessage {
     sessionId: string;
     timestamp: string;
     status: MessageStatus;
+}
+
+interface StreamChunk {
+    type: 'content' | 'tool_call' | 'tool_result';
+    content: string | Record<string, any>;
+    toolCallId?: string;
 }
 
 enum MessageType {
@@ -77,6 +85,7 @@ class AssistantServer {
     private readonly groqService: GroqService;
     private readonly wss: WebSocketServer;
     private readonly activeConnections: Map<string, WebSocket>;
+    private readonly configManager: ToolConfigManager;
 
     constructor() {
         const app = express();
@@ -84,19 +93,19 @@ class AssistantServer {
         this.wss = new WebSocketServer({ server });
         
         // Initialize ConfigManager
-        const configManager = new ToolConfigManager(path.resolve(__dirname, 'config/toolConfig.json'));
-
+        this.configManager = new ToolConfigManager(path.resolve(__dirname, 'config/toolConfig.json'));
+        
         // Initialize NangoService
         const nangoService = new NangoService(process.env.NANGO_SECRET_KEY!);
 
-        // Initialize ToolServiceProvider with both required arguments
+        // Initialize ToolServiceProvider
         const toolServiceProvider = new ToolServiceProvider(
-            configManager,
+            this.configManager,
             nangoService
         );
 
         // Initialize GroqService and set ToolServiceProvider
-        this.groqService = new GroqService(process.env.GROQ_API_KEY!, configManager);
+        this.groqService = new GroqService(process.env.GROQ_API_KEY!, this.configManager);
         this.groqService.setToolServiceProvider(toolServiceProvider);
         
         this.activeConnections = new Map();
@@ -166,11 +175,6 @@ class AssistantServer {
                 logger.error('WebSocket error:', error);
             });
         });
-
-        // Handle WebSocket server errors
-        this.wss.on('error', (error: Error) => {
-            logger.error('WebSocket server error:', error);
-        });
     }
 
     private async handleStreamingMessage(ws: WebSocket, message: ClientMessage) {
@@ -184,33 +188,48 @@ class AssistantServer {
                 sessionId: message.sessionId,
                 timestamp: new Date().toISOString(),
                 status: MessageStatus.PENDING
-            } as ServerMessage));
-
+            }));
+    
+            // Get connection details from config
+            const connectionId = this.configManager.getConnectionId('google-mail');
+            const providerConfigKey = this.configManager.getProviderConfigKey('google-mail');
+    
+            logger.debug('Using provider details:', { 
+                connectionId,
+                providerConfigKey
+            });
+    
             // Get streaming response
             const messageStream = this.groqService.streamMessage(
                 message.content,
                 message.sessionId,
-                message.connectionId,
-                message.provider
+                connectionId,
+                providerConfigKey
             );
 
             for await (const chunk of messageStream) {
-                ws.send(JSON.stringify({
-                    messageId: `stream-${message.messageId}`,
-                    content: chunk.content,
-                    type: chunk.type === 'content' ? MessageType.ASSISTANT : MessageType.SYSTEM,
-                    toolCalls: [],
-                    sessionId: message.sessionId,
-                    timestamp: new Date().toISOString(),
-                    status: MessageStatus.PENDING
-                } as ServerMessage));
+                logger.debug('Received chunk:', { chunk });
 
-                // If this is a tool call or result, log it
-                if (chunk.type !== 'content') {
-                    logger.info(`${chunk.type}:`, {
-                        content: chunk.content,
-                        toolCallId: chunk.toolCallId
-                    });
+                try {
+                    // Format chunk based on its type
+                    const formattedMessage = {
+                        messageId: `stream-${message.messageId}`,
+                        content: typeof chunk.content === 'string' ? 
+                            chunk.content : 
+                            JSON.stringify(chunk.content),
+                        type: chunk.type === 'content' ? 
+                            MessageType.ASSISTANT : 
+                            MessageType.SYSTEM,
+                        toolCalls: [],
+                        sessionId: message.sessionId,
+                        timestamp: new Date().toISOString(),
+                        status: MessageStatus.PENDING
+                    };
+
+                    ws.send(JSON.stringify(formattedMessage));
+                    logger.debug('Sent formatted message:', { formattedMessage });
+                } catch (error) {
+                    logger.error('Error processing chunk:', { error, chunk });
                 }
             }
 
@@ -223,7 +242,7 @@ class AssistantServer {
                 sessionId: message.sessionId,
                 timestamp: new Date().toISOString(),
                 status: MessageStatus.COMPLETE
-            } as ServerMessage));
+            }));
 
         } catch (error) {
             logger.error('Streaming error:', error);
@@ -235,7 +254,7 @@ class AssistantServer {
                 sessionId: message.sessionId,
                 timestamp: new Date().toISOString(),
                 status: MessageStatus.ERROR
-            } as ServerMessage));
+            }));
         }
     }
 
@@ -253,7 +272,7 @@ class AssistantServer {
                     sessionId: id,
                     timestamp: new Date().toISOString(),
                     status: MessageStatus.COMPLETE
-                } as ServerMessage));
+                }));
                 ws.close();
             } catch (e) {
                 logger.error(`Error closing connection ${id}:`, e);
